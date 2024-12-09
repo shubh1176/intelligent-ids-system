@@ -29,16 +29,11 @@ This project aims to enhance the security of networks by detecting potential int
 
 This project uses the [CICIDS2017 dataset](https://www.unb.ca/cic/datasets/ids-2017.html), a widely recognized dataset for network intrusion detection research. 
 
-- **Contents**:
-  - Labeled network flows
-  - Packet payloads
-  - Preprocessed CSV files for machine learning applications
 - **Usage**:
   - The dataset must be downloaded and appropriately preprocessed before use in the IDS.
 
 ### Citation
 
-If you use this code or the CICIDS2017 dataset, please cite the following paper:
 
 ```bibtex
 @inproceedings{sharafaldin2018toward,
