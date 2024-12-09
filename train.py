@@ -4,7 +4,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.model_selection import train_test_split
 import numpy as np
-from model import EnhancedNetworkSignalModel
+from model import NetworkSignalModel
 from utils import VisualizationUtils
 from tqdm import tqdm
 import logging
@@ -25,9 +25,12 @@ def setup_logging():
     )
 
 def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler, 
-                num_epochs=100, device='cuda'):
+                num_epochs=100, device='cuda', patience=5, accuracy_threshold=99.99):
     model = model.to(device)
     best_val_loss = float('inf')
+    best_accuracy = 0
+    patience_counter = 0
+    perfect_accuracy_counter = 0
     
     # Initialize lists to store metrics
     train_losses = []
@@ -72,8 +75,6 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
         val_loss = 0.0
         correct = 0
         total = 0
-        all_preds = []
-        all_labels = []
         val_pbar = tqdm(val_loader, desc=f'Epoch {epoch+1}/{num_epochs} [Validation]')
         
         with torch.no_grad():
@@ -86,9 +87,6 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
                 _, predicted = outputs.max(1)
                 total += labels.size(0)
                 correct += predicted.eq(labels).sum().item()
-                
-                all_preds.extend(predicted.cpu().numpy())
-                all_labels.extend(labels.cpu().numpy())
                 
                 val_pbar.set_postfix({'loss': f'{loss.item():.4f}'})
         
@@ -109,15 +107,13 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
         logging.info(f'Val Loss: {val_loss:.4f}')
         logging.info(f'Accuracy: {accuracy:.2f}%')
         
-        # Plot current training progress
-        VisualizationUtils.plot_training_history(
-            train_losses, val_losses, accuracies,
-            save_path=f'training_progress_epoch_{epoch+1}.png'
-        )
-        
-        # Save best model
-        if val_loss < best_val_loss:
+        # Check if this is the best model
+        if accuracy > best_accuracy:
+            best_accuracy = accuracy
             best_val_loss = val_loss
+            patience_counter = 0
+            
+            # Save best model
             torch.save({
                 'epoch': epoch,
                 'model_state_dict': model.state_dict(),
@@ -126,6 +122,33 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
                 'val_loss': val_loss,
                 'accuracy': accuracy
             }, 'best_model.pth')
+            
+            logging.info(f"New best model saved with accuracy: {accuracy:.2f}%")
+        else:
+            patience_counter += 1
+        
+        # Check for perfect or near-perfect accuracy
+        if accuracy >= accuracy_threshold:
+            perfect_accuracy_counter += 1
+            if perfect_accuracy_counter >= 3:  # Require 3 consecutive epochs of near-perfect accuracy
+                logging.info(f"\nAchieved sustained accuracy of {accuracy:.2f}% for 3 consecutive epochs")
+                logging.info("Early stopping triggered - Model has achieved optimal performance")
+                return train_losses, val_losses, accuracies
+        else:
+            perfect_accuracy_counter = 0
+        
+        # Early stopping check
+        if patience_counter >= patience:
+            logging.info(f"\nEarly stopping triggered - No improvement for {patience} epochs")
+            return train_losses, val_losses, accuracies
+    
+    # Add final visualization after training is complete
+    VisualizationUtils.plot_training_history(
+        train_losses, val_losses, accuracies,
+        save_path='final_training_progress.png'
+    )
+    
+    return train_losses, val_losses, accuracies
 
 def main():
     setup_logging()
@@ -190,23 +213,25 @@ def main():
     val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)
     
     # Initialize model with correct input dimensions
-    model = EnhancedNetworkSignalModel(
+    model = NetworkSignalModel(
         input_dim=X_train.shape[2],  # Number of features
         num_classes=len(np.unique(y))  # Number of unique classes
     )
     
-    # Use Label Smoothing loss
-    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
+    # Use Label Smoothing loss with reduced smoothing
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.05)  # Reduced from 0.1
     
-    # Optimizer and scheduler
-    optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=0.01)
+    # Modified optimizer with lower initial learning rate
+    optimizer = optim.AdamW(model.parameters(), lr=0.0005, weight_decay=0.01)
+    
+    # Modified scheduler parameters
     scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
         optimizer, 
-        T_0=10,
+        T_0=5,  # Reduced from 10
         T_mult=2
     )
     
-    # Train model
+    # Train model with modified parameters
     train_model(
         model=model,
         train_loader=train_loader,
@@ -215,8 +240,13 @@ def main():
         optimizer=optimizer,
         scheduler=scheduler,
         num_epochs=100,
-        device=device
+        device=device,
+        patience=10,  # Increased from 5
+        accuracy_threshold=99.5  # Reduced from 99.99
     )
+
+    unique_classes = np.unique(y)
+    logging.info(f"Dataset contains {len(unique_classes)} classes: {unique_classes}")
 
 if __name__ == '__main__':
     main() 

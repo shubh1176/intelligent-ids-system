@@ -1,54 +1,46 @@
+import logging
 import numpy as np
 import pandas as pd
 from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.feature_selection import VarianceThreshold
+from sklearn.utils import check_array
+from typing import Tuple
+from imblearn.over_sampling import SMOTE
+from data_cleaner import NetworkDataCleaner
+from sklearn.ensemble import RandomForestClassifier
+from pathlib import Path
 
 def load_and_preprocess_data(data_path):
-    # Load network traffic data
-    data = pd.read_csv(data_path)
+    # Load data
+    data = pd.read_csv(data_path, low_memory=False)
     
-    # Print column names to debug
-    print(f"Available columns in {data_path}:")
-    print(data.columns.tolist())
+    # Initialize cleaner
+    cleaner = NetworkDataCleaner()
     
-    print("Column names with repr:", [repr(col) for col in data.columns])
+    # Basic preprocessing
+    data = cleaner.clean_column_names(data)
+    data = cleaner.remove_constant_features(data)
     
-    # Find the label column case-insensitively
+    # Find label column
     label_col = next((col for col in data.columns if col.lower().strip() == 'label'), None)
     if label_col is None:
-        raise ValueError(f"Could not find label column in {data_path}. Available columns are: {data.columns.tolist()}")
+        raise ValueError(f"Could not find label column in {data_path}")
     
-    # Extract features (excluding the label column)
-    features = data.drop([label_col], axis=1)
+    # Separate features and labels
+    features = data.drop(columns=[label_col])
+    labels = data[label_col]
     
-    # Handle missing values and infinities
-    features = features.replace([np.inf, -np.inf], np.nan)
-    features = features.fillna(0)
-    
-    # Convert all features to numeric, handling any non-numeric columns
-    for column in features.columns:
-        if features[column].dtype == 'object':
-            features[column] = pd.to_numeric(features[column], errors='coerce')
-    
-    # Clip extremely large values to a reasonable range
-    # You might need to adjust these values based on your data
-    clip_value = 1e9  # Adjust this threshold as needed
-    features = features.clip(-clip_value, clip_value)
-    
-    # Extract labels and encode them
-    label_encoder = LabelEncoder()
-    labels = label_encoder.fit_transform(data[label_col])
-    
-    # Add debug information
-    print("\nData statistics before normalization:")
-    print(features.describe())
-    print("\nChecking for remaining infinities:", np.isinf(features.values).sum())
-    print("Checking for remaining NaNs:", np.isnan(features.values).sum())
+    # Clean features
+    features = cleaner.handle_missing_values(features)
+    features = cleaner.handle_outliers(features)
     
     # Normalize features
-    scaler = StandardScaler()
-    features_normalized = scaler.fit_transform(features)
+    features_normalized = cleaner.scaler.fit_transform(features)
     
-    return features_normalized, labels, label_encoder
+    # Encode labels
+    labels_encoded = cleaner.label_encoder.fit_transform(labels)
+    
+    return features_normalized, labels_encoded, cleaner.label_encoder
 
 def create_sliding_windows(data, window_size=100, stride=50):
     """
@@ -102,3 +94,36 @@ def combine_datasets(file_paths):
     combined_labels = np.concatenate(all_labels, axis=0)
     
     return combined_features, combined_labels, label_encoder
+
+def select_features(features: pd.DataFrame, threshold: float = 0.95) -> pd.DataFrame:
+    """Remove low variance and highly correlated features"""
+    # Remove constant and quasi-constant features
+    selector = VarianceThreshold(threshold=0.01)
+    selector.fit(features)
+    features = features.iloc[:, selector.get_support(indices=True)]
+    
+    # Remove highly correlated features
+    corr_matrix = features.corr().abs()
+    upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
+    to_drop = [column for column in upper.columns if any(upper[column] > threshold)]
+    
+    return features.drop(columns=to_drop)
+
+def balance_classes(features: np.ndarray, labels: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Balance classes using SMOTE"""
+    smote = SMOTE(random_state=42)
+    features_balanced, labels_balanced = smote.fit_resample(features, labels)
+    return features_balanced, labels_balanced
+
+def select_important_features(features: np.ndarray, labels: np.ndarray, n_features: int = 20) -> np.ndarray:
+    """Select most important features using Random Forest feature importance"""
+    rf = RandomForestClassifier(n_estimators=100, random_state=42)
+    rf.fit(features, labels)
+    
+    # Get feature importance scores
+    importances = rf.feature_importances_
+    indices = np.argsort(importances)[::-1]
+    
+    # Select top n features
+    selected_indices = indices[:n_features]
+    return features[:, selected_indices]

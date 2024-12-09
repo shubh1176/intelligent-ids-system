@@ -2,158 +2,103 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class SEBlock(nn.Module):
-    """Helps the model focus on important features by adding channel attention"""
-    def __init__(self, channel, reduction=16):
+class AdaptiveChannelCalibration(nn.Module):
+    """Dynamically calibrates channel importance based on current input patterns"""
+    def __init__(self, channels):
         super().__init__()
         self.avg_pool = nn.AdaptiveAvgPool1d(1)
-        self.fc = nn.Sequential(
-            nn.Linear(channel, channel // reduction, bias=False),
-            nn.ReLU(inplace=True),
-            nn.Linear(channel // reduction, channel, bias=False),
+        self.max_pool = nn.AdaptiveMaxPool1d(1)
+        
+        self.mlp = nn.Sequential(
+            nn.Linear(channels * 2, channels // 2),
+            nn.ReLU(),
+            nn.Linear(channels // 2, channels),
             nn.Sigmoid()
         )
-
+        
     def forward(self, x):
         b, c, _ = x.size()
-        y = self.avg_pool(x).view(b, c)
-        y = self.fc(y).view(b, c, 1)
-        return x * y.expand_as(x)
-
-class ResidualBlock(nn.Module):
-    """Processes features while maintaining signal integrity through skip connections"""
-    def __init__(self, in_channels, out_channels, stride=1):
-        super().__init__()
-        self.conv1 = nn.Conv1d(in_channels, out_channels, 3, stride=stride, padding=1)
-        self.bn1 = nn.BatchNorm1d(out_channels)
-        self.conv2 = nn.Conv1d(out_channels, out_channels, 3, padding=1)
-        self.bn2 = nn.BatchNorm1d(out_channels)
-        self.se = SEBlock(out_channels)
+        avg_pool = self.avg_pool(x).view(b, c)
+        max_pool = self.max_pool(x).view(b, c)
         
-        # Skip connection if dimensions change
-        self.shortcut = nn.Sequential()
-        if stride != 1 or in_channels != out_channels:
-            self.shortcut = nn.Sequential(
-                nn.Conv1d(in_channels, out_channels, 1, stride=stride),
-                nn.BatchNorm1d(out_channels)
-            )
+        # Combine global information
+        global_info = torch.cat([avg_pool, max_pool], dim=1)
+        channel_weights = self.mlp(global_info).view(b, c, 1)
         
-        self.dropout = nn.Dropout(0.1)
+        return x * channel_weights
 
-    def forward(self, x):
-        out = F.relu(self.bn1(self.conv1(x)))
-        out = self.bn2(self.conv2(out))
-        out = self.se(out)
-        out += self.shortcut(x)
-        out = F.relu(out)
-        return self.dropout(out)
-
-class ImprovedSignalTransformerBlock(nn.Module):
-    """Processes temporal relationships in network signals using self-attention"""
-    def __init__(self, dim, heads=8, dim_head=64, dropout=0.1, max_seq_length=512):
+class DynamicFeatureFusion(nn.Module):
+    """Adaptively fuses features based on their discriminative power"""
+    def __init__(self, channels):
         super().__init__()
-        self.attention = nn.MultiheadAttention(dim, heads, dropout=dropout)
-        self.ffn = nn.Sequential(
-            nn.Linear(dim, dim * 4),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(dim * 4, dim)
+        self.conv_1x1 = nn.Conv1d(channels * 3, channels, 1)
+        self.gate = nn.Sequential(
+            nn.Conv1d(channels * 3, channels, 1),
+            nn.Sigmoid()
         )
-        self.norm1 = nn.LayerNorm(dim)
-        self.norm2 = nn.LayerNorm(dim)
-        self.dropout = nn.Dropout(dropout)
         
-        # Position bias for better temporal understanding
-        self.max_seq_length = max_seq_length
-        self.rel_pos_bias = nn.Parameter(torch.zeros(2 * max_seq_length - 1, heads))
+    def forward(self, x):
+        # Extract features at different scales
+        x1 = F.avg_pool1d(x, 3, stride=1, padding=1)
+        x2 = F.avg_pool1d(x, 5, stride=1, padding=2)
+        x3 = x
         
-    def forward(self, x, rel_pos=None):
-        if rel_pos is not None:
-            rel_pos = rel_pos.squeeze()
-            if rel_pos.dim() > 2:
-                rel_pos = None
-                
-        att_out, _ = self.attention(x, x, x, rel_pos)
-        att_out = self.dropout(att_out)
-        out1 = self.norm1(x + att_out)
+        # Concatenate multi-scale features
+        concat = torch.cat([x1, x2, x3], dim=1)
         
-        ffn_out = self.ffn(out1)
-        out2 = self.norm2(out1 + ffn_out)
+        # Generate fusion weights
+        weights = self.gate(concat)
         
-        return out2
-    
-    def _get_rel_pos(self, length):
-        pos = torch.arange(length, device=self.rel_pos_bias.device)
-        rel_pos = pos.unsqueeze(1) - pos.unsqueeze(0)
-        rel_pos += self.max_seq_length - 1
-        rel_pos = torch.clamp(rel_pos, min=0, max=2 * self.max_seq_length - 2)
-        return F.embedding(rel_pos, self.rel_pos_bias)
+        # Fuse features
+        fused = self.conv_1x1(concat)
+        return fused * weights
 
-class EnhancedNetworkSignalModel(nn.Module):
-    """Main model combining CNN, Transformer, and multi-scale processing for network traffic analysis"""
+class NetworkSignalModel(nn.Module):
     def __init__(self, input_dim, num_classes=2):
         super().__init__()
         
-        # Convert input features to initial representation
-        self.input_projection = nn.Sequential(
+        # Initial feature extraction
+        self.input_proj = nn.Sequential(
             nn.Conv1d(input_dim, 64, 1),
             nn.BatchNorm1d(64),
             nn.ReLU()
         )
         
-        # Extract hierarchical features
-        self.res_blocks = nn.Sequential(
-            ResidualBlock(64, 128),
-            ResidualBlock(128, 256),
-            ResidualBlock(256, 512)
+        # Feature processing blocks
+        self.block1 = nn.Sequential(
+            DynamicFeatureFusion(64),
+            AdaptiveChannelCalibration(64)
         )
         
-        # Process temporal patterns
-        self.transformer_blocks = nn.ModuleList([
-            ImprovedSignalTransformerBlock(dim=512) for _ in range(4)
-        ])
+        self.block2 = nn.Sequential(
+            DynamicFeatureFusion(64),
+            AdaptiveChannelCalibration(64)
+        )
         
-        # Capture patterns at different scales
-        self.multi_scale = nn.ModuleList([
-            nn.Conv1d(512, 512, kernel_size=k, padding=k//2)
-            for k in [3, 5, 7]
-        ])
-        
-        # Final classification layers
+        # Classification head with feature aggregation
         self.classifier = nn.Sequential(
             nn.AdaptiveAvgPool1d(1),
             nn.Flatten(),
-            nn.Linear(512 * 4, 1024),
-            nn.ReLU(),
-            nn.Dropout(0.5),
-            nn.Linear(1024, 512),
+            nn.Linear(64, 32),
             nn.ReLU(),
             nn.Dropout(0.3),
-            nn.Linear(512, num_classes)
+            nn.Linear(32, num_classes)
         )
         
-        self.apply(self._init_weights)
-        
-    def _init_weights(self, m):
-        if isinstance(m, (nn.Linear, nn.Conv1d)):
-            nn.init.kaiming_normal_(m.weight)
-            if m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-                
     def forward(self, x):
-        x = self.input_projection(x)
-        x = self.res_blocks(x)
+        # Initial projection
+        x = self.input_proj(x)
         
-        multi_scale_features = [x]
-        for conv in self.multi_scale:
-            multi_scale_features.append(conv(x))
+        # Dynamic feature processing with stronger residual connections
+        identity = x
+        x = self.block1(x)
+        x = x + identity  # Skip connection
+        x = F.relu(x)  # Added activation after residual
         
-        x = torch.cat(multi_scale_features, dim=1)
+        identity = x
+        x = self.block2(x)
+        x = x + identity  # Skip connection
+        x = F.relu(x)  # Added activation after residual
         
-        x = x.transpose(1, 2)
-        for transformer in self.transformer_blocks:
-            x = transformer(x)
-        x = x.transpose(1, 2)
-        
-        x = self.classifier(x)
-        return x 
+        # Classification
+        return self.classifier(x) 
