@@ -1,27 +1,54 @@
-# Intelligent Network Intrusion Detection System (NIDS)
+# Network Signal Analysis Model
 
-An advanced deep learning-based network intrusion detection system (IDS) developed using PyTorch. This project incorporates both centralized and federated learning approaches to ensure robust performance and privacy-preserving capabilities.
+A deep learning model for network signal analysis using PyTorch, featuring dynamic feature fusion and adaptive channel calibration.
 
----
+## Architecture Overview
 
-## Overview
+The model consists of three main components:
 
-This project aims to enhance the security of networks by detecting potential intrusions using state-of-the-art machine learning techniques. Key features include:
+1. **Input Projection Layer**
+   - 1x1 Convolution for initial feature extraction
+   - Batch Normalization and ReLU activation
+   - Output: 64 channels
 
-- **Deep Neural Networks**: Efficient pattern recognition for identifying malicious activities.
-- **Federated Learning**: Distributed training without compromising data privacy.
-- **Data Preprocessing**: Robust cleaning and preparation of raw data for accurate analysis.
-- **Multi-Scale Feature Extraction**: Comprehensive feature analysis to improve detection accuracy.
-- **Real-Time Monitoring**: Visualization tools for live tracking of network activity and anomalies.
+2. **Dual Processing Blocks**
+   Each block contains:
+   - Dynamic Feature Fusion (DFF)
+     - Multi-scale feature extraction (3,5 window sizes)
+     - Adaptive feature weighting
+     - 1x1 Convolution for dimension reduction
+   - Adaptive Channel Calibration (ACC)
+     - Parallel avg/max pooling
+     - MLP-based channel attention
+   - Skip connections with ReLU activation
 
----
+3. **Classification Head**
+   - Adaptive Average Pooling
+   - Two-layer classifier (64→32→num_classes)
+   - Dropout regularization (0.3)
 
-## Features(under development)
+## Key Features
 
-- **Centralized and Federated Learning**: Supports traditional centralized training and federated learning for distributed environments.
-- **Advanced Model Architecture**: Leverages deep neural networks for efficient detection of network anomalies.
-- **Comprehensive Dataset Utilization**: Utilizes CICIDS2017 dataset for diverse intrusion scenarios.
-- **Real-Time Visualization**: Includes dashboards to monitor network traffic and detect intrusions in real time.
+- **Dynamic Feature Processing**: Multi-scale feature extraction with adaptive fusion
+- **Channel Attention**: Learnable channel-wise feature calibration
+- **Residual Connections**: Enhanced gradient flow with skip connections
+- **Label Smoothing**: Improved generalization with smoothed targets
+- **Cosine Learning Rate**: Warm restarts for optimal convergence
+
+## Training Configuration
+
+- Optimizer: AdamW (lr=0.0005, weight_decay=0.01)
+- Loss: CrossEntropy with label smoothing (0.05)
+- Learning Rate Schedule: CosineAnnealingWarmRestarts
+- Early Stopping: Patience=10, Accuracy Threshold=99.5%
+- Batch Size: 64
+- Sequence Processing: 100-sample windows, 50-sample stride
+
+## Performance Monitoring
+
+- Real-time loss and accuracy tracking
+- Training history visualization
+- Early stopping based on validation metrics
 
 ---
 
