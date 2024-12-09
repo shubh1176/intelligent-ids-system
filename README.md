@@ -16,7 +16,7 @@ This project aims to enhance the security of networks by detecting potential int
 
 ---
 
-## Features
+## Features(under development)
 
 - **Centralized and Federated Learning**: Supports traditional centralized training and federated learning for distributed environments.
 - **Advanced Model Architecture**: Leverages deep neural networks for efficient detection of network anomalies.
