@@ -4,7 +4,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
 from sklearn.model_selection import train_test_split
 import numpy as np
-from model import NetworkSignalModel
+from model import ImprovedNetworkModel
 from utils import VisualizationUtils
 from tqdm import tqdm
 import logging
@@ -213,7 +213,7 @@ def main():
     val_loader = DataLoader(val_dataset, batch_size=64, shuffle=False)
     
     # Initialize model with correct input dimensions
-    model = NetworkSignalModel(
+    model = ImprovedNetworkModel(
         input_dim=X_train.shape[2],  # Number of features
         num_classes=len(np.unique(y))  # Number of unique classes
     )
@@ -222,13 +222,17 @@ def main():
     criterion = nn.CrossEntropyLoss(label_smoothing=0.05)  # Reduced from 0.1
     
     # Modified optimizer with lower initial learning rate
-    optimizer = optim.AdamW(model.parameters(), lr=0.0005, weight_decay=0.01)
+    optimizer = optim.AdamW(model.parameters(), lr=0.001, weight_decay=0.01)
     
     # Modified scheduler parameters
-    scheduler = optim.lr_scheduler.CosineAnnealingWarmRestarts(
-        optimizer, 
-        T_0=5,  # Reduced from 10
-        T_mult=2
+    scheduler = optim.lr_scheduler.OneCycleLR(
+        optimizer,
+        max_lr=0.001,
+        epochs=100,
+        steps_per_epoch=len(train_loader),
+        pct_start=0.1,
+        div_factor=25.0,
+        final_div_factor=1000.0
     )
     
     # Train model with modified parameters

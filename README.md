@@ -1,65 +1,47 @@
 # Network Signal Analysis Model
 
-A deep learning model for network signal analysis using PyTorch, featuring dynamic feature fusion and adaptive channel calibration.
+A deep learning model for network signal analysis using PyTorch, featuring residual learning, self-attention, and multi-scale processing.
 
 ## Architecture Overview
 
 The model consists of three main components:
 
-1. **Input Projection Layer**
-   - 1x1 Convolution for initial feature extraction
-   - Batch Normalization and ReLU activation
-   - Output: 64 channels
+1. **Input Processing**
+   - 1x1 Convolution for initial feature projection (input_dim → 128 channels)
+   - Batch Normalization and Dropout regularization
 
-2. **Dual Processing Blocks**
-   Each block contains:
-   - Dynamic Feature Fusion (DFF)
-     - Multi-scale feature extraction (3,5 window sizes)
-     - Adaptive feature weighting
-     - 1x1 Convolution for dimension reduction
-   - Adaptive Channel Calibration (ACC)
-     - Parallel avg/max pooling
-     - MLP-based channel attention
-   - Skip connections with ReLU activation
+2. **Feature Extraction**
+   - Residual blocks with self-attention mechanism
+   - Multi-scale processing (3,5,7 kernel sizes)
+   - Feature fusion with channel calibration
+   - Dropout layers for regularization
 
 3. **Classification Head**
    - Adaptive Average Pooling
-   - Two-layer classifier (64→32→num_classes)
+   - Three-layer classifier (256→128→64→num_classes)
    - Dropout regularization (0.3)
 
 ## Key Features
 
-- **Dynamic Feature Processing**: Multi-scale feature extraction with adaptive fusion
-- **Channel Attention**: Learnable channel-wise feature calibration
-- **Residual Connections**: Enhanced gradient flow with skip connections
-- **Label Smoothing**: Improved generalization with smoothed targets
-- **Cosine Learning Rate**: Warm restarts for optimal convergence
+- **Self-Attention**: Captures long-range dependencies in network traffic
+- **Residual Learning**: Enhanced gradient flow and deeper architecture
+- **Multi-Scale Processing**: Captures patterns at different temporal scales
+- **Dynamic Feature Fusion**: Adaptive feature combination
+- **Strong Regularization**: Multiple dropout layers and batch normalization
 
 ## Training Configuration
 
-- Optimizer: AdamW (lr=0.0005, weight_decay=0.01)
+- Optimizer: AdamW (lr=0.001, weight_decay=0.01)
 - Loss: CrossEntropy with label smoothing (0.05)
-- Learning Rate Schedule: CosineAnnealingWarmRestarts
-- Early Stopping: Patience=10, Accuracy Threshold=99.5%
+- Learning Rate Schedule: OneCycleLR with warm restarts
+- Early Stopping: Patience=5, Accuracy Threshold=99.99%
 - Batch Size: 64
-- Sequence Processing: 100-sample windows, 50-sample stride
-
-## Performance Monitoring
-
-- Real-time loss and accuracy tracking
-- Training history visualization
-- Early stopping based on validation metrics
-
----
 
 ## Dataset
 
-This project uses the [CICIDS2017 dataset](https://www.unb.ca/cic/datasets/ids-2017.html), a widely recognized dataset for network intrusion detection research. 
+Uses the CICIDS2017 dataset for network intrusion detection.
 
-- **Usage**:
-  - The dataset must be downloaded and appropriately preprocessed before use in the IDS.
-
-### Citation
+For dataset details and citation, see original paper:
 
 
 ```bibtex
